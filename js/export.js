@@ -141,6 +141,24 @@ export function toFastaWithCdr(results) {
   return blocks.join('\n') + '\n';
 }
 
+/** Compact CDR overview: one row per domain (id, CDR1, CDR2, CDR3), tab-separated. */
+export function toCdrSummary(results) {
+  const lines = ['id\tCDR1\tCDR2\tCDR3'];
+  for (const r of results) {
+    if (r.errors && r.errors.length) {
+      lines.push(`${r.id}\t\t\t`);
+      continue;
+    }
+    const domains = r.domains || [];
+    const multi = domains.length > 1;
+    for (const d of domains) {
+      const id = multi ? `${r.id} (${d.chainType})` : r.id;
+      lines.push([id, d.cdrs.CDR1 || '', d.cdrs.CDR2 || '', d.cdrs.CDR3 || ''].join('\t'));
+    }
+  }
+  return lines.join('\n') + '\n';
+}
+
 export function download(filename, text, mime) {
   const blob = new Blob([text], { type: mime || 'text/plain;charset=utf-8' });
   const url = URL.createObjectURL(blob);

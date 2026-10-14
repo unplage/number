@@ -11,7 +11,9 @@ sequences and annotating their CDRs.
 - Everything runs **locally in the browser** — no server, no API, no data leaves the device.
   After the first visit the whole app (including the ~1 MB engine) is cached and works
   **completely offline**.
-- Results export to TSV, CSV, JSON, aligned text, ANARCI-style output, and FASTA + CDRs.
+- Results start with a **CDR overview table** (one row per sequence/domain: `id  CDR1  CDR2  CDR3`)
+  followed by the per-sequence detail, and export to TSV, CSV, JSON, aligned text,
+  ANARCI-style output, FASTA + CDRs, and the CDR summary.
 
 ## How it works
 

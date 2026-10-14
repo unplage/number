@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { toTsv, toCsv, toJson, toAligned, toAnarci, toFastaWithCdr } from '../js/export.js';
+import { toTsv, toCsv, toJson, toAligned, toAnarci, toFastaWithCdr, toCdrSummary } from '../js/export.js';
 
 const results = [
   {
@@ -71,4 +71,27 @@ test('annotated FASTA carries CDR header', () => {
   assert.match(text, /^>vh_H \| scheme=kabat/);
   assert.match(text, /CDR1=D/);
   assert.match(text, /\nEVD/);
+});
+
+test('CDR summary has id + CDR1/2/3 columns', () => {
+  const lines = toCdrSummary(results).split('\n');
+  assert.equal(lines[0], 'id\tCDR1\tCDR2\tCDR3');
+  assert.equal(lines[1], 'vh\tD\t\t');
+});
+
+test('CDR summary labels multi-domain records with the chain', () => {
+  const multi = [
+    {
+      id: 'scfv',
+      scheme: 'kabat',
+      errors: [],
+      domains: [
+        { chainType: 'H', cdrs: { CDR1: 'A', CDR2: 'B', CDR3: 'C' } },
+        { chainType: 'K', cdrs: { CDR1: 'D', CDR2: 'E', CDR3: 'F' } },
+      ],
+    },
+  ];
+  const lines = toCdrSummary(multi).trim().split('\n');
+  assert.equal(lines[1], 'scfv (H)\tA\tB\tC');
+  assert.equal(lines[2], 'scfv (K)\tD\tE\tF');
 });

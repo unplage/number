@@ -2,7 +2,7 @@
 
 import { parseFasta } from './fasta.js';
 import { analyze, getEngineVersion, SCHEMES } from './engine.js';
-import { toTsv, toCsv, toJson, toAligned, toAnarci, toFastaWithCdr, download } from './export.js';
+import { toTsv, toCsv, toJson, toAligned, toAnarci, toFastaWithCdr, toCdrSummary, download } from './export.js';
 
 const $ = (sel) => document.querySelector(sel);
 const el = (tag, cls, text) => {
@@ -220,11 +220,73 @@ function renderDomain(seq, d, seqIndex, domIndex) {
   return wrap;
 }
 
+function cdrSummaryRows(results) {
+  const rows = [];
+  for (const seq of results) {
+    if (seq.errors && seq.errors.length) {
+      rows.push({ id: seq.id, error: seq.errors.join(' ') });
+      continue;
+    }
+    const domains = seq.domains || [];
+    const multi = domains.length > 1;
+    for (const d of domains) {
+      rows.push({ id: multi ? `${seq.id} (${d.chainType})` : seq.id, cdrs: d.cdrs, chainType: d.chainType });
+    }
+  }
+  return rows;
+}
+
+function renderCdrSummary(results) {
+  const rows = cdrSummaryRows(results);
+  if (rows.length === 0) return null;
+
+  const card = el('section', 'seq-card');
+  const head = el('div', 'seq-head');
+  head.appendChild(el('span', 'sid', 'CDR overview'));
+  const numbered = rows.filter((r) => r.cdrs).length;
+  head.appendChild(el('span', 'meta', `${numbered} domain(s) · all sequences`));
+  card.appendChild(head);
+
+  const body = el('div', 'domain');
+  const scroll = el('div', 'table-scroll');
+  const table = el('table', 'numb cdr-summary');
+  const thead = el('thead');
+  const hr = el('tr');
+  for (const h of ['ID', 'CDR1', 'CDR2', 'CDR3']) hr.appendChild(el('th', null, h));
+  thead.appendChild(hr);
+  table.appendChild(thead);
+
+  const tbody = el('tbody');
+  for (const row of rows) {
+    const tr = el('tr');
+    tr.appendChild(el('td', 'id-cell', row.id));
+    if (row.error) {
+      const td = el('td', 'cdr-err', row.error);
+      td.colSpan = 3;
+      tr.appendChild(td);
+    } else {
+      for (const name of ['CDR1', 'CDR2', 'CDR3']) {
+        const seq = (row.cdrs && row.cdrs[name]) || '';
+        tr.appendChild(el('td', `cdr-${name.toLowerCase()}`, seq || '—'));
+      }
+    }
+    tbody.appendChild(tr);
+  }
+  table.appendChild(tbody);
+  scroll.appendChild(table);
+  body.appendChild(scroll);
+  card.appendChild(body);
+  return card;
+}
+
 function renderResults(results) {
   const container = $('#results');
   container.innerHTML = '';
   container.hidden = false;
   $('#downloads').hidden = false;
+
+  const summary = renderCdrSummary(results);
+  if (summary) container.appendChild(summary);
 
   for (const seq of results) {
     const card = el('article', 'seq-card');
@@ -440,14 +502,15 @@ $('#cancel-btn').addEventListener('click', () => {
   if (state.controller) state.controller.abort();
 });
 
-const DL = { tsv: toTsv, csv: toCsv, json: toJson, aligned: toAligned, anarci: toAnarci, fasta: toFastaWithCdr };
+const DL = { tsv: toTsv, csv: toCsv, json: toJson, aligned: toAligned, anarci: toAnarci, fasta: toFastaWithCdr, summary: toCdrSummary };
 const MIME = { json: 'application/json;charset=utf-8', csv: 'text/csv;charset=utf-8', tsv: 'text/tab-separated-values;charset=utf-8' };
 for (const btn of document.querySelectorAll('.dl')) {
   btn.addEventListener('click', () => {
     if (!state.results) return;
     const fmt = /** @type {HTMLElement} */ (btn).dataset.fmt;
-    const ext = { aligned: 'txt', anarci: 'txt', fasta: 'fasta' }[fmt] || fmt;
-    download(`antibody_numbering.${ext}`, DL[fmt](state.results), MIME[fmt] || 'text/plain;charset=utf-8');
+    const ext = { aligned: 'txt', anarci: 'txt', fasta: 'fasta', summary: 'tsv' }[fmt] || fmt;
+    const mime = fmt === 'summary' ? 'text/tab-separated-values;charset=utf-8' : MIME[fmt] || 'text/plain;charset=utf-8';
+    download(`antibody_numbering.${ext}`, DL[fmt](state.results), mime);
   });
 }
 

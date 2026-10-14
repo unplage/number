@@ -153,6 +153,12 @@ table.numb td.cdr1 { background: var(--cdr1); }
 table.numb td.cdr2 { background: var(--cdr2); }
 table.numb td.cdr3 { background: var(--cdr3); }
 
+.table-scroll { overflow-x: auto; }
+table.cdr-summary { min-width: 420px; }
+table.cdr-summary th:first-child, table.cdr-summary .id-cell { white-space: nowrap; font-weight: 600; }
+table.cdr-summary td { word-break: break-all; }
+table.cdr-summary td.cdr-err { color: var(--err); font-family: inherit; }
+
 pre.aligned { font-family: var(--mono); font-size: 0.78rem; background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 12px; overflow-x: auto; white-space: pre; }
 
 .mini-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
