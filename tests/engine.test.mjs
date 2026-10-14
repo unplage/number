@@ -102,3 +102,14 @@ test('supports cancellation via AbortSignal', async () => {
 test('getEngineVersion returns a string', () => {
   assert.equal(typeof getEngineVersion(), 'string');
 });
+
+test('allowedSpecies restricts chain typing without breaking results', async () => {
+  const { results } = await analyze([{ id: 'vh', sequence: VH }], 'imgt', {
+    wasmSource: wasm,
+    allowedSpecies: ['human'],
+  });
+  const d = results[0].domains[0];
+  assert.equal(d.chainType, 'H');
+  assert.equal(d.species, 'human');
+  assert.ok(d.cdrs.CDR3.length > 0);
+});

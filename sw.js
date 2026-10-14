@@ -2,7 +2,7 @@
 // Service worker: precache the full app (including the ~1 MB numbering engine)
 // so the tool works completely offline after the first visit.
 
-const CACHE = 'antibody-number-v3';
+const CACHE = 'antibody-number-v4';
 
 const ASSETS = [
   './',
@@ -15,12 +15,13 @@ const ASSETS = [
   './js/data/blosum62.js',
   './js/validate.js',
   './js/analysis.js',
-  './js/number-worker.js',
   './js/fasta.js',
   './js/kabat-light.js',
   './js/vhh.js',
   './js/export.js',
   './lib/anarcism/index.js',
+  './lib/anarcism/worker-pool.js',
+  './lib/anarcism/worker.js',
   './lib/anarcism/anarcism.wasm',
   './icons/icon.svg',
   './icons/icon-192.png',

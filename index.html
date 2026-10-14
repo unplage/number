@@ -44,6 +44,19 @@
             <option value="wolfguy">Wolfguy</option>
           </select>
         </label>
+        <label class="field">
+          <span class="field-label">Species</span>
+          <select id="species-select" aria-label="Restrict chain typing to one species (faster)">
+            <option value="">All species</option>
+          </select>
+        </label>
+        <label class="field">
+          <span class="field-label">Chains</span>
+          <select id="chain-select" aria-label="Chain types to score">
+            <option value="ig" selected>Antibody (H/K/L)</option>
+            <option value="all">All, incl. TCR</option>
+          </select>
+        </label>
         <p id="scheme-desc" class="scheme-desc"></p>
       </div>
     </section>

@@ -34,8 +34,14 @@ anarcism's IMGT output into the 128-state HMM vector and applying a numbering-sc
 
 `js/vhh.js` flags camelid VHH sequences (Kabat FR2 positions 37/44/45/47). `js/validate.js`
 rejects nucleotide / malformed input and flags tags. `js/analysis.js` computes CDR lengths
-and PTM/liability motifs. `js/number-worker.js` runs numbering in a Web Worker (with a
-main-thread fallback used by the tests).
+and PTM/liability motifs.
+
+**Numbering dispatch** (`js/engine.js`): batches of `>= POOL_THRESHOLD` (100) sequences are
+numbered by anarcism's multicore `AnarcismWorkerPool` (vendored `lib/anarcism/worker-pool.js`
++ `worker.js`); smaller batches and environments without `Worker` use the in-process WASM
+engine (`loadEngine`). An `allowedSpecies` option (UI: species filter) restricts chain typing
+and roughly halves the time. The pool is created lazily and any pool failure falls back to the
+synchronous engine.
 
 ## Critical conventions
 

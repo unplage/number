@@ -1,7 +1,7 @@
 // UI controller.
 
 import { parseFasta } from './fasta.js';
-import { analyze, getEngineVersion, SCHEMES } from './engine.js';
+import { analyze, getEngineVersion, SCHEMES, SPECIES, ALLOWED_CHAINS, DEFAULT_CHAINS } from './engine.js';
 import { toTsv, toCsv, toJson, toAligned, toAnarci, toFastaWithCdr, toCdrSummary, download } from './export.js';
 
 const $ = (sel) => document.querySelector(sel);
@@ -43,6 +43,15 @@ function setStatus(html, isError) {
 
 function currentScheme() {
   return $('#scheme-select').value;
+}
+
+function currentSpecies() {
+  const v = $('#species-select').value;
+  return v ? [v] : undefined;
+}
+
+function currentChains() {
+  return $('#chain-select').value === 'all' ? ALLOWED_CHAINS : DEFAULT_CHAINS;
 }
 
 // ---------------------------------------------------------------------------
@@ -329,8 +338,8 @@ async function renderCompare() {
   setStatus('<span class="spinner"></span>Numbering with IMGT and Kabat for comparison…');
   try {
     const [imgt, kabat] = await Promise.all([
-      analyze(records, 'imgt'),
-      analyze(records, 'kabat'),
+      analyze(records, 'imgt', { allowedSpecies: currentSpecies(), allowedChains: currentChains() }),
+      analyze(records, 'kabat', { allowedSpecies: currentSpecies(), allowedChains: currentChains() }),
     ]);
     state.engineVersion = imgt.engineVersion;
     renderCompareResults(imgt.results, kabat.results);
@@ -425,6 +434,8 @@ async function run() {
   try {
     const { results, engineVersion } = await analyze(records, state.scheme, {
       signal: controller.signal,
+      allowedSpecies: currentSpecies(),
+      allowedChains: currentChains(),
       onProgress: (done, total) => {
         $('#progress-bar').style.width = total ? `${Math.round((done / total) * 100)}%` : '0%';
       },
@@ -528,3 +539,14 @@ if ('serviceWorker' in navigator) {
 window.addEventListener('online', () => { $('#offline-badge').hidden = false; });
 
 $('#scheme-desc').textContent = SCHEME_DESC.imgt;
+
+// Populate the species filter (default = all species).
+{
+  const select = $('#species-select');
+  for (const sp of SPECIES) {
+    const opt = document.createElement('option');
+    opt.value = sp;
+    opt.textContent = sp.charAt(0).toUpperCase() + sp.slice(1);
+    select.appendChild(opt);
+  }
+}

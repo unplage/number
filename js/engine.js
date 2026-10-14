@@ -1,6 +1,10 @@
 // Analysis orchestrator: chain typing + IMGT via anarcism; other schemes via
 // the ANARCI port (js/schemes.js). Kabat light chains use the dedicated anchor
 // engine (js/kabat-light.js) to avoid ANARCI/AbRSA VL CDR3 errors.
+//
+// Large batches are numbered by a multicore Web Worker pool (anarcism's
+// AnarcismWorkerPool); small batches and environments without Worker use the
+// in-process WASM engine.
 
 import { Anarcism } from '../lib/anarcism/index.js';
 import { schemeNumberingFromDomain } from './schemes.js';
@@ -11,7 +15,14 @@ import { cdrLengths, findLiabilities } from './analysis.js';
 
 export const SCHEMES = ['imgt', 'kabat', 'chothia', 'martin', 'aho', 'wolfguy'];
 export const ALLOWED_CHAINS = ['H', 'K', 'L', 'A', 'B', 'G', 'D'];
-const IG_CHAINS = new Set(['H', 'K', 'L']);
+export const DEFAULT_CHAINS = ['H', 'K', 'L'];
+export const SPECIES = ['human', 'mouse', 'rat', 'rabbit', 'rhesus', 'pig', 'alpaca', 'cow'];
+const IG_CHAINS = new Set(DEFAULT_CHAINS);
+
+// Batches at or above this many sequences use the worker pool (multicore).
+const POOL_THRESHOLD = 100;
+// Cap worker count so we don't spin up dozens of WASM instances.
+const MAX_POOL_WORKERS = 8;
 
 const CHAIN_LABELS = {
   H: 'Heavy (IGH)',
@@ -23,8 +34,7 @@ const CHAIN_LABELS = {
   D: 'TCR delta',
 };
 
-// CDR (FR) boundaries per scheme and chain letter. Values are inclusive
-// position-number ranges; regions not listed are framework.
+// CDR (FR) boundaries per scheme and chain letter (inclusive position ranges).
 const CDR_RANGES = {
   kabat: {
     H: { CDR1: [31, 35], CDR2: [50, 65], CDR3: [95, 102], FR1: [1, 30], FR2: [36, 49], FR3: [66, 94], FR4: [103, 999] },
@@ -44,10 +54,6 @@ const CDR_RANGES = {
   },
 };
 CDR_RANGES.martin = CDR_RANGES.chothia;
-
-function lightLetter(chainType) {
-  return 'L';
-}
 
 function regionForPosition(scheme, chainType, n) {
   const chain = chainType === 'H' ? 'H' : 'L';
@@ -76,7 +82,7 @@ function posLabel(chainType, n, ins) {
 }
 
 // ---------------------------------------------------------------------------
-// Engine loading
+// Engine loading (main thread; used for small batches and as a fallback)
 // ---------------------------------------------------------------------------
 
 let enginePromise = null;
@@ -97,54 +103,28 @@ export function getEngineVersion() {
 }
 
 // ---------------------------------------------------------------------------
-// Numbering (worker with sync fallback)
+// Worker pool (multicore) for large batches
 // ---------------------------------------------------------------------------
 
-let worker = null;
-function getWorker() {
-  if (worker !== null) return worker;
-  if (typeof Worker === 'undefined') {
-    worker = false;
-    return worker;
+let poolPromise = null;
+
+function getPool() {
+  if (typeof Worker === 'undefined') return Promise.resolve(null);
+  if (poolPromise === null) {
+    poolPromise = import('../lib/anarcism/worker-pool.js')
+      .then(({ AnarcismWorkerPool, recommendedWorkerCount }) =>
+        AnarcismWorkerPool.create({ workers: Math.min(recommendedWorkerCount(), MAX_POOL_WORKERS) }),
+      )
+      .catch(() => null);
   }
-  try {
-    worker = new Worker(new URL('./number-worker.js', import.meta.url), { type: 'module' });
-  } catch {
-    worker = false;
-  }
-  return worker;
-}
-
-const NUMBER_OPTIONS = { allowedChains: ALLOWED_CHAINS, assignGermline: true };
-
-function numberSync(engine, seqs) {
-  return engine.numberSequences(seqs, NUMBER_OPTIONS);
-}
-
-async function numberViaWorker(w, seqs) {
-  return new Promise((resolve, reject) => {
-    const onMessage = (e) => {
-      w.removeEventListener('message', onMessage);
-      w.removeEventListener('error', onError);
-      if (e.data && e.data.ok) resolve(e.data.results);
-      else reject(new Error(e.data && e.data.error ? e.data.error : 'worker error'));
-    };
-    const onError = (err) => {
-      w.removeEventListener('message', onMessage);
-      w.removeEventListener('error', onError);
-      reject(err);
-    };
-    w.addEventListener('message', onMessage);
-    w.addEventListener('error', onError);
-    w.postMessage({ seqs, options: NUMBER_OPTIONS });
-  });
+  return poolPromise;
 }
 
 // ---------------------------------------------------------------------------
 // Domain processing
 // ---------------------------------------------------------------------------
 
-function processDomain(record, domain, scheme, engine) {
+function processDomain(record, domain, scheme) {
   const chainType = domain.chainType;
   const out = {
     chainType,
@@ -178,7 +158,6 @@ function processDomain(record, domain, scheme, engine) {
     out.errors.push(`Scheme "${scheme}" is only defined for antibody heavy/kappa/lambda chains (got ${chainType}). Use IMGT for TCR.`);
     return out;
   } else if (scheme === 'kabat' && chainType !== 'H') {
-    // Kabat light chains: dedicated anchor engine.
     const normalized = domain.normalizedSequence || record.sequence;
     const seq = normalized.slice(domain.start, domain.end);
     try {
@@ -241,11 +220,12 @@ function processDomain(record, domain, scheme, engine) {
  * @param {(done:number,total:number)=>void} [opts.onProgress]
  * @param {AbortSignal} [opts.signal]
  * @param {ArrayBuffer|Uint8Array} [opts.wasmSource]
+ * @param {string[]} [opts.allowedSpecies] restrict chain typing to these species (faster)
+ * @param {string[]} [opts.allowedChains] chain types to score (default antibody H/K/L; adds TCR when set)
  * @returns {Promise<{results:object[], engineVersion:string|null}>}
  */
 export async function analyze(records, scheme, opts = {}) {
-  const { onProgress, signal, wasmSource } = opts;
-  const engine = await loadEngine(wasmSource);
+  const { onProgress, signal, wasmSource, allowedSpecies, allowedChains } = opts;
   const prepared = records.map((rec) => ({ rec, validation: validateSequence(rec.sequence) }));
 
   const indexes = [];
@@ -258,28 +238,50 @@ export async function analyze(records, scheme, opts = {}) {
   });
 
   const total = seqs.length;
-  let done = 0;
   if (onProgress) onProgress(0, total);
 
-  const batchSize = 50;
-  const resultByIndex = new Map();
-  const w = total > batchSize ? getWorker() : false;
+  const numberOptions = {
+    allowedChains: allowedChains && allowedChains.length ? allowedChains : DEFAULT_CHAINS,
+    assignGermline: true,
+  };
+  if (allowedSpecies && allowedSpecies.length) numberOptions.allowedSpecies = allowedSpecies;
 
-  for (let start = 0; start < seqs.length; start += batchSize) {
-    if (signal && signal.aborted) throw signal.reason || new Error('aborted');
-    const chunk = seqs.slice(start, start + batchSize);
-    let numbered;
-    try {
-      numbered = w ? await numberViaWorker(w, chunk) : numberSync(engine, chunk);
-    } catch (e) {
-      // Fall back to the main-thread engine if the worker fails.
-      numbered = numberSync(engine, chunk);
-      void e;
+  const resultByIndex = new Map();
+
+  const pool = total >= POOL_THRESHOLD ? await getPool() : null;
+  if (pool) {
+    engineVersion = pool.version;
+    const chunkSize = 250;
+    let done = 0;
+    for (let start = 0; start < seqs.length; start += chunkSize) {
+      if (signal && signal.aborted) throw signal.reason || new Error('aborted');
+      const chunk = seqs.slice(start, start + chunkSize);
+      let numbered;
+      try {
+        numbered = await pool.numberSequences(chunk, { ...numberOptions, signal });
+      } catch (e) {
+        if (signal && signal.aborted) throw signal.reason || e;
+        const engine = await loadEngine(wasmSource);
+        numbered = engine.numberSequences(chunk, numberOptions);
+      }
+      chunk.forEach((s, j) => resultByIndex.set(start + j, numbered[j]));
+      done += chunk.length;
+      if (onProgress) onProgress(done, total);
+      await new Promise((r) => setTimeout(r, 0));
     }
-    chunk.forEach((s, j) => resultByIndex.set(start + j, numbered[j]));
-    done += chunk.length;
-    if (onProgress) onProgress(done, total);
-    await new Promise((r) => setTimeout(r, 0));
+  } else if (total > 0) {
+    const engine = await loadEngine(wasmSource);
+    const batchSize = 50;
+    let done = 0;
+    for (let start = 0; start < seqs.length; start += batchSize) {
+      if (signal && signal.aborted) throw signal.reason || new Error('aborted');
+      const chunk = seqs.slice(start, start + batchSize);
+      const numbered = engine.numberSequences(chunk, numberOptions);
+      chunk.forEach((s, j) => resultByIndex.set(start + j, numbered[j]));
+      done += chunk.length;
+      if (onProgress) onProgress(done, total);
+      await new Promise((r) => setTimeout(r, 0));
+    }
   }
 
   const results = prepared.map((p, i) => {
@@ -305,7 +307,7 @@ export async function analyze(records, scheme, opts = {}) {
     base.warnings.push(...(imgt.warnings || []));
     for (const domain of imgt.domains) {
       domain.normalizedSequence = imgt.normalizedSequence;
-      base.domains.push(processDomain({ ...base, sequence: p.validation.sequence }, domain, scheme, engine));
+      base.domains.push(processDomain({ ...base, sequence: p.validation.sequence }, domain, scheme));
     }
     return base;
   });

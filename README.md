@@ -6,6 +6,9 @@ sequences and annotating their CDRs.
 - **Six numbering schemes**: IMGT, Kabat, Chothia, Martin (extended Chothia), AHo, Wolfguy.
 - Chain typing (H / K / L, plus VHH hallmark detection), germline V/J assignment, numbering
   confidence, CDR loop lengths and sequence-liability (PTM) flags.
+- **Fast on large inputs**: large batches are numbered by a **multicore Web Worker pool**;
+  chain typing defaults to antibody chains (H/K/L, optionally add TCR) and a **species filter**
+  (default: all) cuts the search space when you know the source species.
 - Paste FASTA, upload a file, or drag & drop. Multiple sequences and multi-domain
   constructs (e.g. scFv) are supported.
 - Everything runs **locally in the browser** — no server, no API, no data leaves the device.
@@ -58,9 +61,8 @@ js/validate.js        input validation (DNA, non-standard residues, tags)
 js/analysis.js        CDR lengths and liability (PTM) motifs
 js/fasta.js           FASTA parser
 js/export.js          TSV/CSV/JSON/aligned/ANARCI/FASTA export
-js/number-worker.js   Web Worker running numbering off the main thread
 js/data/blosum62.js   Blosum62 subset (ANARCI, BSD-3-Clause)
-lib/anarcism/         vendored anarcism WASM engine (Apache-2.0)
+lib/anarcism/         vendored anarcism WASM engine + worker pool (Apache-2.0)
 tests/                node:test suite + golden fixtures
 tools/                scripts to regenerate the golden fixtures
 docs/reference/       upstream source used for the ports (reference only)
