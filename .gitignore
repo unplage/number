@@ -1,0 +1,13 @@
+# dependencies (the app itself has none)
+node_modules/
+npm-debug.log*
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/
+
+# reference scratch
+*.tgz

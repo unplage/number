@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#0f172a" />
+  <title>Antibody Numbering — IMGT &amp; Kabat</title>
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png" />
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <header class="app-header">
+    <div class="wrap header-inner">
+      <div class="brand">
+        <img src="icons/icon.svg" alt="" width="36" height="36" />
+        <div>
+          <h1>Antibody Numbering</h1>
+          <p>Variable-region numbering &amp; CDR annotation · IMGT &amp; Kabat · runs fully offline</p>
+        </div>
+      </div>
+      <span id="offline-badge" class="badge badge-ok" hidden>Offline ready</span>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section class="panel">
+      <div class="panel-head">
+        <h2>1 · Input sequences</h2>
+        <div class="input-actions">
+          <label class="file-btn">
+            Upload FASTA
+            <input id="file-input" type="file" accept=".fa,.fasta,.faa,.txt,.seq,text/plain" hidden />
+          </label>
+          <button id="example-btn" class="ghost-btn" type="button">Load example</button>
+          <button id="clear-btn" class="ghost-btn" type="button">Clear</button>
+        </div>
+      </div>
+      <textarea id="fasta-input" spellcheck="false"
+        placeholder=">my_antibody_VH&#10;EVQLVESGGGLVQPGGSLRLSCAAS...&#10;&#10;>my_antibody_VL&#10;DIQMTQSPSSLSASVGDRVTITC..."></textarea>
+      <p class="hint">Paste FASTA records or upload a file (.fa / .fasta / .txt). Multiple sequences and multi-domain constructs (e.g. scFv) are supported.</p>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>2 · Numbering scheme</h2>
+      </div>
+      <div class="scheme-row">
+        <label class="scheme-opt">
+          <input type="radio" name="scheme" value="imgt" checked />
+          <span><strong>IMGT</strong><small>ANARCI-identical IMGT numbering (anarcism WASM)</small></span>
+        </label>
+        <label class="scheme-opt">
+          <input type="radio" name="scheme" value="kabat" />
+          <span><strong>Kabat</strong><small>VH: official ANARCI Kabat rules · VL: anchor engine (fixes ANARCI VL CDR3)</small></span>
+        </label>
+      </div>
+      <div class="run-row">
+        <button id="analyze-btn" class="primary-btn" type="button">Analyze</button>
+        <span id="status" class="status" role="status"></span>
+      </div>
+    </section>
+
+    <section id="results" class="results" hidden></section>
+
+    <section id="downloads" class="panel downloads" hidden>
+      <div class="panel-head"><h2>3 · Download results</h2></div>
+      <div class="dl-buttons">
+        <button id="dl-tsv" class="ghost-btn" type="button">Download TSV</button>
+        <button id="dl-json" class="ghost-btn" type="button">Download JSON</button>
+        <button id="dl-aligned" class="ghost-btn" type="button">Download aligned text</button>
+      </div>
+    </section>
+  </main>
+
+  <footer class="app-footer">
+    <div class="wrap">
+      <p>Runs entirely in your browser. First load caches the numbering engine (~1&nbsp;MB) for offline use.</p>
+      <p>IMGT numbering via <a href="https://www.npmjs.com/package/@revanta/anarcism" target="_blank" rel="noopener">anarcism</a>.
+        Kabat VH rules ported from <a href="https://github.com/oxpig/ANARCI" target="_blank" rel="noopener">ANARCI</a> (GPLv3).
+        Kabat VL engine &amp; VHH detection ported from <a href="https://github.com/unplage/humanization" target="_blank" rel="noopener">unplage/humanization</a> (MIT).
+        See ATTRIBUTIONS.md.</p>
+      <p>This program is free software under the GNU GPLv3. Not for clinical use.</p>
+    </div>
+  </footer>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
