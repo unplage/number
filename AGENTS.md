@@ -59,6 +59,9 @@ code must keep the combined work GPLv3-compatible; keep `ATTRIBUTIONS.md` in syn
 
 ## Deployment / PWA gotchas
 
+- GitHub Pages serves the repo directly from the `main` branch root (`.nojekyll` present),
+  so there is no CI/build step. The `unplage/number` token in this project's history lacked
+  the `workflow` scope, which is why there is no GitHub Actions workflow.
 - `sw.js` precaches every asset by URL. **When you add, rename, or remove a file, update the
   `ASSETS` list and bump the `CACHE` version string**, or returning users get stale files.
 - All paths are relative (`./`) so the app works from the Pages subpath `/number/`. Keep it

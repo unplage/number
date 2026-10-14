@@ -61,8 +61,9 @@ docs/reference/       upstream source used for the ports (reference only)
 
 ## Deployment
 
-Pushing to `main` triggers `.github/workflows/deploy.yml`, which runs the tests and
-publishes the static site to GitHub Pages.
+GitHub Pages is configured to serve this repository directly from the `main` branch root
+(no build step). Pushing to `main` updates the live site at
+<https://unplage.github.io/number/>. Tests run locally with `npm test`.
 
 ## License
 
