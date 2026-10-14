@@ -85,7 +85,8 @@ function findJAnchor(s, start, end) {
 
 /**
  * Number a light chain (kappa/lambda) with Kabat numbering.
- * @returns {{ pos: string, aa: string, region: string }[]} residues in sequence order
+ * @param {string} seq
+ * @returns {{ residues: { pos: string, aa: string, region: string }[], warnings: string[] }}
  */
 export function numberLight(seq) {
   const s = seq.toUpperCase().trim();

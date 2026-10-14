@@ -1,7 +1,8 @@
+// @ts-nocheck -- service worker global scope typing differs from the DOM lib.
 // Service worker: precache the full app (including the ~1 MB numbering engine)
 // so the tool works completely offline after the first visit.
 
-const CACHE = 'antibody-number-v1';
+const CACHE = 'antibody-number-v2';
 
 const ASSETS = [
   './',
@@ -10,8 +11,12 @@ const ASSETS = [
   './css/style.css',
   './js/app.js',
   './js/engine.js',
+  './js/schemes.js',
+  './js/data/blosum62.js',
+  './js/validate.js',
+  './js/analysis.js',
+  './js/number-worker.js',
   './js/fasta.js',
-  './js/anarci-port.js',
   './js/kabat-light.js',
   './js/vhh.js',
   './js/export.js',

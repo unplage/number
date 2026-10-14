@@ -1,29 +1,24 @@
-// Result export: TSV, JSON, aligned numbered text.
+// Result export: TSV, CSV, JSON, aligned text, ANARCI-style, annotated FASTA.
 
-function flattenRows(results) {
-  const rows = [];
+function rows(results) {
+  const out = [];
   for (const r of results) {
     if (r.errors && r.errors.length) {
-      rows.push({
-        seq_id: r.id,
-        domain: '',
-        chain: '',
-        species: '',
-        scheme: r.scheme,
-        position: '',
-        amino_acid: '',
-        region: '',
-        note: r.errors.join('; '),
-      });
+      out.push({ seq_id: r.id, chain: '', species: '', scheme: r.scheme, position: '', amino_acid: '', region: '', note: r.errors.join('; ') });
       continue;
     }
     for (const d of r.domains || []) {
+      const g = d.germline || {};
       for (const res of d.residues) {
-        rows.push({
+        out.push({
           seq_id: r.id,
-          domain: String(d.start) + '-' + String(d.end),
           chain: d.chainType,
-          species: d.species,
+          species: d.species || '',
+          v_gene: g.vGene || '',
+          v_identity: g.vIdentity != null ? g.vIdentity.toFixed(3) : '',
+          j_gene: g.jGene || '',
+          bit_score: d.bitScore != null ? d.bitScore.toFixed(1) : '',
+          confidence: d.confidence || '',
           scheme: r.scheme,
           position: res.pos,
           amino_acid: res.aa,
@@ -33,27 +28,33 @@ function flattenRows(results) {
       }
     }
   }
-  return rows;
+  return out;
 }
 
+const COLUMNS = [
+  'seq_id', 'chain', 'species', 'v_gene', 'v_identity', 'j_gene',
+  'bit_score', 'confidence', 'scheme', 'position', 'amino_acid', 'region', 'note',
+];
+
 export function toTsv(results) {
-  const rows = flattenRows(results);
-  const cols = ['seq_id', 'domain', 'chain', 'species', 'scheme', 'position', 'amino_acid', 'region', 'note'];
-  const lines = [cols.join('\t')];
-  for (const row of rows) lines.push(cols.map((c) => row[c]).join('\t'));
+  const lines = [COLUMNS.join('\t')];
+  for (const row of rows(results)) lines.push(COLUMNS.map((c) => row[c] ?? '').join('\t'));
   return lines.join('\n') + '\n';
 }
 
-export function toJson(results) {
-  return JSON.stringify(
-    {
-      generated: new Date().toISOString(),
-      tool: 'antibody-number (anarcism + ANARCI-Kabat port)',
-      results,
-    },
-    null,
-    2,
-  ) + '\n';
+function csvCell(v) {
+  const s = String(v ?? '');
+  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+export function toCsv(results) {
+  const lines = [COLUMNS.join(',')];
+  for (const row of rows(results)) lines.push(COLUMNS.map((c) => csvCell(row[c])).join(','));
+  return lines.join('\n') + '\n';
+}
+
+export function toJson(results, meta = {}) {
+  return JSON.stringify({ generated: new Date().toISOString(), tool: 'antibody-number', ...meta, results }, null, 2) + '\n';
 }
 
 export function toAligned(results) {
@@ -65,34 +66,77 @@ export function toAligned(results) {
       continue;
     }
     for (const d of r.domains || []) {
-      blocks.push(
-        `# chain=${d.chainType} species=${d.species} range=${d.start}-${d.end}` +
-          (d.isVhh ? ' VHH' : '') +
-          (d.warnings && d.warnings.length ? ` warnings=${d.warnings.join('; ')}` : ''),
-      );
-      // Numbered blocks of 10
+      const tags = [
+        `chain=${d.chainType}`, `species=${d.species}`, `range=${d.start}-${d.end}`,
+        d.confidence ? `confidence=${d.confidence}` : '',
+        d.isVhh ? 'VHH' : '',
+      ].filter(Boolean).join(' ');
+      blocks.push(`# ${tags}`);
+      if (d.germline && d.germline.vGene) {
+        blocks.push(`# germline V=${d.germline.vGene}${d.germline.vIdentity != null ? ` (${(d.germline.vIdentity * 100).toFixed(0)}%)` : ''}${d.germline.jGene ? ` J=${d.germline.jGene}` : ''}`);
+      }
       const res = d.residues;
-      const POS_W = 7;
-      const numLine = [];
-      const aaLine = [];
+      const W = 7;
+      let numLine = [];
+      let aaLine = [];
       for (let i = 0; i < res.length; i++) {
-        numLine.push(res[i].pos.padEnd(POS_W));
-        aaLine.push(res[i].aa.padEnd(POS_W));
+        numLine.push(res[i].pos.padEnd(W));
+        aaLine.push(res[i].aa.padEnd(W));
         if ((i + 1) % 10 === 0 || i === res.length - 1) {
-          blocks.push(numLine.join(' '));
-          blocks.push(aaLine.join(' '));
+          blocks.push(numLine.join(' ').trimEnd());
+          blocks.push(aaLine.join(' ').trimEnd());
           blocks.push('');
-          numLine.length = 0;
-          aaLine.length = 0;
+          numLine = [];
+          aaLine = [];
         }
       }
-      const cdrs = Object.entries(d.cdrs || {})
-        .filter(([, v]) => v)
-        .map(([k, v]) => `${k}=${v}`)
-        .join('  ');
+      const cdrs = Object.entries(d.cdrs || {}).filter(([, v]) => v).map(([k, v]) => `${k}=${v}`).join('  ');
       if (cdrs) blocks.push(`# ${cdrs}`);
+      if (d.liabilities && d.liabilities.length) {
+        blocks.push(`# liabilities: ${d.liabilities.map((l) => `${l.type}(${l.positions})`).join('; ')}`);
+      }
     }
     blocks.push('');
+  }
+  return blocks.join('\n') + '\n';
+}
+
+/** ANARCI-style numbered output ("//" separated domain records). */
+export function toAnarci(results) {
+  const blocks = [];
+  for (const r of results) {
+    if (r.errors && r.errors.length) continue;
+    for (const d of r.domains || []) {
+      const g = d.germline || {};
+      blocks.push(`# ${r.id} | chain=${d.chainType} | species=${d.species} | scheme=${r.scheme}${g.vGene ? ` | v_gene=${g.vGene}` : ''}`);
+      blocks.push('# pos\taa\tregion');
+      for (const res of d.residues) blocks.push(`${res.pos}\t${res.aa}\t${res.region}`);
+      blocks.push('//');
+    }
+  }
+  return blocks.join('\n') + '\n';
+}
+
+/** FASTA with CDR annotations in the header, one record per variable domain. */
+export function toFastaWithCdr(results) {
+  const blocks = [];
+  for (const r of results) {
+    if (r.errors && r.errors.length) continue;
+    for (let di = 0; di < (r.domains || []).length; di++) {
+      const d = r.domains[di];
+      const g = d.germline || {};
+      const header = [
+        `${r.id}_${d.chainType}${di > 0 ? `_${di + 1}` : ''}`,
+        `scheme=${r.scheme}`,
+        `chain=${d.chainType}`,
+        g.vGene ? `v_gene=${g.vGene}` : '',
+        `CDR1=${d.cdrs.CDR1 || ''}`,
+        `CDR2=${d.cdrs.CDR2 || ''}`,
+        `CDR3=${d.cdrs.CDR3 || ''}`,
+      ].filter(Boolean).join(' | ');
+      blocks.push(`>${header}`);
+      blocks.push(d.residues.map((x) => x.aa).join(''));
+    }
   }
   return blocks.join('\n') + '\n';
 }
