@@ -113,3 +113,62 @@ test('allowedSpecies restricts chain typing without breaking results', async () 
   assert.equal(d.species, 'human');
   assert.ok(d.cdrs.CDR3.length > 0);
 });
+
+const VL_LAMBDA = 'QSVLTQPPSVSAAPGQKVTISCSGSSSNIGNNYVSWYQQLPGTAPKLLIYDNNKRPSGIPDRFSGSKSGTSATLGITGLQTGDEADYYCGTWDSSLSAVVFGGGTKLTVL';
+
+test('Kabat VL: the lambda FR1 gap is preserved and the conserved Cys is L23', async () => {
+  const { results } = await analyze([{ id: 'lambda', sequence: VL_LAMBDA }], 'kabat', { wasmSource: wasm });
+  const d = results[0].domains[0];
+  assert.equal(d.errors.length, 0);
+  const byPos = new Map(d.residues.map((r) => [r.pos, r.aa]));
+  // A lambda FR1 is one residue shorter than the Kabat reference: L10 is a gap
+  // and the conserved cysteine keeps its canonical L23.
+  assert.equal(byPos.get('L23'), 'C');
+  assert.equal(byPos.has('L10'), false);
+  assert.equal(byPos.get('L11'), 'V');
+  assert.equal(byPos.get('L98'), 'F', 'FR4 starts at the J region');
+  // The CDR assignment is unchanged.
+  assert.equal(d.cdrs.CDR1, 'SGSSSNIGNNYVS');
+  assert.equal(d.cdrs.CDR2, 'DNNKRPS');
+  assert.equal(d.cdrs.CDR3, 'GTWDSSLSAVV');
+  const labels = d.residues.map((r) => r.pos);
+  assert.equal(new Set(labels).size, labels.length, 'no duplicated position labels');
+});
+
+test('Kabat VL: a long CDR3 keeps the J region', async () => {
+  const seq =
+    'DIQMTQSPSSLSASVGDRVTITCRASQDVNTAVAWYQQKPGKAPKLLIYSASFLYSGVPSRFSGSRSGTDFTLTISSLQPEDFATYYC' +
+    'QQWYSSPPPTAAAA' +
+    'FGQGTKVEIK';
+  const { results } = await analyze([{ id: 'vl_long', sequence: seq }], 'kabat', { wasmSource: wasm });
+  const d = results[0].domains[0];
+  assert.equal(d.errors.length, 0);
+  assert.equal(d.cdrs.CDR3, 'QQWYSSPPPTAAAA');
+  const fr4 = d.residues.filter((r) => r.region === 'FR4');
+  assert.equal(fr4.length, 10, 'FR4 must not be swallowed by CDR3');
+  assert.equal(fr4[0].pos, 'L98');
+  assert.equal(fr4[0].aa, 'F');
+});
+
+test('Wolfguy: the heavy CDR3 covers the 331/332 positions', async () => {
+  // The Wolfguy CDRH3 is {331, 332} plus 351-399: the first two positions are
+  // the N-terminal end of the IMGT CDR3 and must not fall into FR3.
+  const { results } = await analyze([{ id: 'vh', sequence: VH }], 'wolfguy', { wasmSource: wasm });
+  const d = results[0].domains[0];
+  assert.equal(d.errors.length, 0);
+  const cdr3 = d.residues.filter((r) => r.region === 'CDR3');
+  assert.equal(cdr3[0].pos, 'H331');
+  assert.equal(cdr3[1].pos, 'H332');
+  assert.equal(d.cdrs.CDR3, 'ARMDY');
+  // The FR3 must stop at the conserved cysteine (H330).
+  const fr3 = d.residues.filter((r) => r.region === 'FR3');
+  assert.equal(fr3.at(-1).pos, 'H330');
+});
+
+test('the CDR3 content is the same in the IMGT and Wolfguy numbering', async () => {
+  const [imgt, wolfguy] = await Promise.all([
+    analyze([{ id: 'vh', sequence: VH }], 'imgt', { wasmSource: wasm }),
+    analyze([{ id: 'vh', sequence: VH }], 'wolfguy', { wasmSource: wasm }),
+  ]);
+  assert.equal(imgt.results[0].domains[0].cdrs.CDR3, wolfguy.results[0].domains[0].cdrs.CDR3);
+});

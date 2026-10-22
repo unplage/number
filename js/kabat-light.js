@@ -2,6 +2,20 @@
 // unplage/humanization scripts/humanize/numbering.py (MIT License).
 // Anchor-based engine: Cys23 -> Trp35 -> Cys88 -> Phe98.
 // Used because ANARCI/AbRSA are known to mis-number VL CDR3.
+//
+// Deliberate deviations from the Python reference (documented in AGENTS.md):
+//   1. The J-anchor (Phe98) search window is widened (16 -> 45 residues). With
+//      the reference window the "FG.G" motif is truncated for CDR3s longer than
+//      ~12 residues, so the anchor is lost and the whole J region is swallowed
+//      by CDR3 (FR4 silently empty).
+//   2. findJAnchor evaluates all three motifs before choosing, exactly like the
+//      reference does. The original JS port stopped after the first hit.
+//   3. When the IMGT alignment is supplied (opts.imgt) the FR1 is numbered from
+//      the alignment instead of sequentially. The conserved Cys therefore lands
+//      on L23 for light chains with an FR1 deletion (lambda, IGLV2/3/...) and
+//      FR1 gaps are preserved instead of being closed up.
+//   4. The FR1 is capped at 23 residues (mirroring number_heavy) so a shifted
+//      Cys anchor cannot assign the same position twice.
 
 function letters(n) {
   const out = [];
@@ -57,6 +71,9 @@ function findC88(s, wIdx, n) {
   return null;
 }
 
+// J-region anchor: the F of the conserved "FG.G" motif. All three motifs are
+// evaluated (as in the Python reference); candidates whose downstream context
+// matches the J consensus win, otherwise the most 3' candidate is used.
 function findJAnchor(s, start, end) {
   const pats = [/FG[GQSTPEA][GTKQE]/g, /FG[A-Z]/g, /F[GSTPEA][GQSTPEK]/g];
   const jTail = /^[GQ][GT][QKE][GT][KLTV]/;
@@ -74,7 +91,6 @@ function findJAnchor(s, start, end) {
         bestTail = tailOk;
       }
     }
-    if (best !== null) break;
   }
   if (best !== null) return best;
   for (let i = start; i < Math.min(start + 4, end); i++) {
@@ -83,33 +99,83 @@ function findJAnchor(s, start, end) {
   return null;
 }
 
+// Window used to look for the J-region anchor. The reference uses 16 residues,
+// which truncates the "FG.G" motif for long CDR3s.
+const J_ANCHOR_WINDOW = 45;
+// Kabat VL framework boundaries used to sanity check the alignment.
+const FR1_MAX = 23;
+const IMGT_CYS = 23;
+const IMGT_FR4_START = 118;
+
 /**
  * Number a light chain (kappa/lambda) with Kabat numbering.
  * @param {string} seq
+ * @param {{imgt?: Array<{pos:number, ins:string}|null>}} [opts]
+ *   `imgt` is the IMGT alignment of `seq` (one entry per residue, `null` when
+ *   the residue has no IMGT position). When given, the FR1 is numbered from the
+ *   alignment so the conserved Cys is placed on L23 even when the FR1 is
+ *   shorter than the Kabat reference (lambda light chains).
  * @returns {{ residues: { pos: string, aa: string, region: string }[], warnings: string[] }}
  */
-export function numberLight(seq) {
+export function numberLight(seq, opts = {}) {
   const s = seq.toUpperCase().trim();
   const n = s.length;
   const warnings = [];
   const res = [];
+  const imgt = Array.isArray(opts.imgt) ? opts.imgt : null;
 
-  // FR1 (1-23), Cys23 anchor
+  // ---- FR1 (1-23), Cys23 anchor ----
   let cIdx = null;
-  for (let i = 20; i < Math.min(27, n); i++) {
-    if (s[i] === 'C') {
-      cIdx = i;
-      break;
+  let cysFromAlignment = false;
+  if (imgt) {
+    for (let i = 0; i < Math.min(imgt.length, n); i++) {
+      const m = imgt[i];
+      if (m && m.pos === IMGT_CYS && !m.ins) {
+        cIdx = i;
+        cysFromAlignment = true;
+        break;
+      }
+    }
+  }
+  if (cIdx === null) {
+    for (let i = 20; i < Math.min(27, n); i++) {
+      if (s[i] === 'C') {
+        cIdx = i;
+        break;
+      }
     }
   }
   if (cIdx === null) {
     throw new Error(`[VL] no conserved Cys23 anchor found in first 27 residues: ${s.slice(0, 27)}`);
   }
-  if (cIdx !== 22) warnings.push(`[VL] Cys23 anchor at index ${cIdx + 1} (expected 23); FR1 length adjusted`);
-  const fr1Len = cIdx + 1;
-  for (let i = 0; i < fr1Len; i++) res.push({ pos: `L${i + 1}`, aa: s[i], region: 'FR1' });
+  if (!cysFromAlignment && cIdx !== 22) {
+    warnings.push(`[VL] Cys23 anchor at index ${cIdx + 1} (expected 23); FR1 length adjusted`);
+  }
+  let fr1Len = cIdx + 1;
+  if (fr1Len > FR1_MAX) {
+    // Cys anchor shifted (e.g. an extra N-terminal residue): keep the standard
+    // 23-residue FR1 and let CDR1 absorb the extra residue. Capping avoids
+    // double-assigning L24 (FR1 tail vs CDR1 start), which would silently drop
+    // one residue.
+    warnings.push(
+      `[VL] Cys23 anchor shifted (C at ${cIdx + 1}); FR1 capped to ${FR1_MAX} residues, CDR1 absorbs the extra`,
+    );
+    fr1Len = FR1_MAX;
+  }
+  if (imgt && cysFromAlignment) {
+    // Number FR1 from the alignment: IMGT state numbers are the Kabat VL
+    // positions for states 1-23, so framework gaps (e.g. the missing L10 of
+    // lambda light chains) are preserved.
+    for (let i = 0; i < fr1Len; i++) {
+      const m = imgt[i];
+      const pos = m && m.pos ? `L${m.pos}${m.ins || ''}` : `L${i + 1}`;
+      res.push({ pos, aa: s[i], region: 'FR1' });
+    }
+  } else {
+    for (let i = 0; i < fr1Len; i++) res.push({ pos: `L${i + 1}`, aa: s[i], region: 'FR1' });
+  }
 
-  // CDR1 (24-34 + 27A..) and FR2 anchor Trp35
+  // ---- CDR1 (24-34 + 27A..) and FR2 anchor Trp35 ----
   const wIdx = findFr2Trp(s, fr1Len, Math.min(fr1Len + 24, n));
   if (wIdx === null) throw new Error('[VL] no Trp35 (FR2 start) anchor found');
   const cdr1Seq = s.slice(fr1Len, wIdx);
@@ -125,7 +191,7 @@ export function numberLight(seq) {
     res.push({ pos, aa: cdr1Seq[j], region: 'CDR1' });
   }
 
-  // FR2 (35-49, 15) / CDR2 (50-56, 7) / FR3 (57-88, 32)
+  // ---- FR2 (35-49, 15) / CDR2 (50-56, 7) / FR3 (57-88, 32) ----
   const c88Idx = findC88(s, wIdx, n);
   if (c88Idx === null) throw new Error('[VL] no Cys88 (FR3 end) anchor found');
   const seg = s.slice(wIdx, c88Idx + 1);
@@ -149,10 +215,26 @@ export function numberLight(seq) {
     res.push({ pos, aa: seg[fr2Len + cdr2Len + j], region: 'FR3' });
   }
 
-  // CDR3 (89-97, inserts on 95) and FR4 (98-107), Phe98 anchor
+  // ---- CDR3 (89-97, inserts on 95) and FR4 (98-107), Phe98 anchor ----
   const jStart = c88Idx + 1;
-  let f98Idx = findJAnchor(s, jStart, Math.min(jStart + 16, n));
-  if (f98Idx === null) f98Idx = n;
+  let f98Idx = findJAnchor(s, jStart, Math.min(jStart + J_ANCHOR_WINDOW, n));
+  if (f98Idx === null) {
+    // The alignment says the domain continues into the FR4 region but no J
+    // anchor could be found: the J region is broken (e.g. the conserved
+    // Trp/Phe mutated), so numbering FR4 would silently mis-assign it.
+    const fr4Residues = imgt
+      ? imgt.filter((m) => m && m.pos >= IMGT_FR4_START).length
+      : 0;
+    if (fr4Residues > 0) {
+      throw new Error(
+        '[VL] no Phe98 (J-region) anchor found although the alignment places ' +
+          `${fr4Residues} residue(s) in the FR4 region - the J region is broken`,
+      );
+    }
+    // V-region-only sequence (no J region): treat the tail as CDR3.
+    f98Idx = n;
+    warnings.push('[VL] no J-region anchor found (V region only?) - the tail was assigned to CDR3, FR4 is empty');
+  }
   const cdr3Seq = s.slice(jStart, f98Idx);
   const cdr3Ins = Math.max(0, cdr3Seq.length - 9);
   for (let j = 0; j < cdr3Seq.length; j++) {

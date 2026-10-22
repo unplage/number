@@ -29,8 +29,27 @@ anarcism's IMGT output into the 128-state HMM vector and applying a numbering-sc
   (`paddedImgtAlignment` + per-residue `position`/`insertionCode`); `convertStateVector()`
   dispatches to the scheme.
 - **Kabat light chain is special** — `js/kabat-light.js` is a standalone anchor engine
-  (Cys23→Trp35→Cys88→Phe98) that ignores anarcism entirely and runs on the raw domain
-  sequence. This is deliberate: ANARCI/AbRSA mis-number Kabat VL CDR3.
+  (Cys23→Trp35→Cys88→Phe98) that runs on the raw domain sequence. This is deliberate:
+  ANARCI/AbRSA mis-number Kabat VL CDR3 (the upstream `unplage/humanization` README
+  documents the ANARCI VL CDR3 bug; its Kabat-VL gap convention differs from the anchor
+  engine for CDR3s of 8 residues or less, where ANARCI gaps the loop tip first).
+  The engine is a port of `unplage/humanization` `number_light` (MIT) with four
+  deliberate deviations, all covered by `tests/kabat-light.test.mjs`:
+  1. The J-anchor (Phe98) search window is 45 residues instead of 16. With the upstream
+     window the `FG.G` motif is truncated for CDR3s of 14 residues or more, the anchor is
+     lost and the whole J region is swallowed by CDR3 (FR4 silently empty).
+  2. `findJAnchor` evaluates all three motifs before choosing (as the Python reference
+     does) instead of stopping after the first hit.
+  3. When the IMGT alignment is supplied (`numberLight(seq, {imgt})`, wired up in
+     `js/engine.js`), the FR1 is numbered from the alignment: the conserved Cys is
+     placed on L23 even for light chains with an FR1 deletion (lambda, IGLV2/3/…) and
+     FR1 gaps (e.g. the missing L10) are preserved instead of being closed up.
+  4. The FR1 is capped at 23 residues (mirroring upstream `number_heavy`) so a shifted
+     Cys anchor cannot assign the same position twice.
+  Without the alignment the engine falls back to the upstream behaviour, so
+  `tests/fixtures/vl_reference.json` (generated from the upstream Python) still matches
+  residue-for-residue. The one intentional divergence is `vl_ladder.json` `cdr3_5`
+  (14-residue CDR3), where upstream loses the J region — see the test comments.
 
 `js/vhh.js` flags camelid VHH sequences (Kabat FR2 positions 37/44/45/47). `js/validate.js`
 rejects nucleotide / malformed input and flags tags. `js/analysis.js` computes CDR lengths
@@ -50,11 +69,27 @@ synchronous engine.
   tests; the app intentionally uses `kabat-light.js`.
 - **Do not change the anarcism output → state-vector reconstruction casually.** Parity with
   real ANARCI for every scheme depends on it. Keep `tests/schemes.test.mjs` green.
+- **Never derive the deletion states from `domain.paddedImgtAlignment`.** That string is the
+  *sequence* with gaps: HMM insertion residues are inlined in it, so its length is
+  128 + (number of insertions) (145 for a long-CDR3 VH, 127 for a light chain) and its
+  characters are shifted by the number of preceding insertions. Reading "is this state
+  deleted?" from it mis-classifies every state after an insertion that is followed by a
+  deletion — one residue is duplicated and another dropped, so the numbered output gets
+  the wrong amino acid. The state vector must be rebuilt from `domain.numbering`
+  (`matchByPos`): a state is a deletion iff no residue carries that IMGT position.
+  `tests/state-vector.test.mjs` guards this.
 - anarcism's IMGT CDR3 insertions (labels `111x`/`112x`) are attached **inside the state
   loop at `s === 111`** in `domainToStateVector`. Attaching them at the end of the vector
   (a past bug) pushes them into FR4 and breaks long-CDR3 numbering.
 - Python-vs-JS ordering matters in scheme ports: several ANARCI blocks **slice before
   sorting** (e.g. AHo FW1). Preserve the exact order of operations.
+- **The CDR boundaries in `js/engine.js` (`CDR_RANGES`) are per scheme, not per IMGT.**
+  Kabat/Chothia/Martin use the published narrow definitions (Kabat H CDR1 31-35, …);
+  AHo uses the AHo scheme's own CDR *regions* (25-42 / 58-77 / 107-138) because the
+  AHo numbering (1-149) is *defined* by those regions — the narrow IMGT-style ranges are
+  not expressible in AHo coordinates (AHo 27-38 would give "GFNIKD" for trastuzumab).
+  So an AHo CDR length is wider than the same loop in Kabat and is not comparable with
+  it. The Wolfguy CDRH3 is `{331, 332}` plus 351-399, so its range starts at 331.
 
 ## Testing
 

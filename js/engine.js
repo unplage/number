@@ -35,6 +35,16 @@ const CHAIN_LABELS = {
 };
 
 // CDR (FR) boundaries per scheme and chain letter (inclusive position ranges).
+//
+// The AHo ranges are the AHo scheme's own CDR *regions* (AHo numbers 1-149 and
+// the scheme is defined by these regions: FR1 1-24, CDR1 25-42, FR2 43-57,
+// CDR2 58-77, FR3 78-106, CDR3 107-138, FR4 139-149). They are deliberately
+// wider than the other schemes' CDR definitions - the AHo regions absorb the
+// gapping of the two-loop CDR1 and of the symmetric CDR2/CDR3 - so an AHo CDR
+// length is not directly comparable with a Kabat/Chothia CDR length.
+//
+// The Wolfguy CDRH3 is {331, 332} plus 351-399 (the first two positions of the
+// block are the N-terminal end of the IMGT CDR3), hence the range starts at 331.
 const CDR_RANGES = {
   kabat: {
     H: { CDR1: [31, 35], CDR2: [50, 65], CDR3: [95, 102], FR1: [1, 30], FR2: [36, 49], FR3: [66, 94], FR4: [103, 999] },
@@ -49,7 +59,7 @@ const CDR_RANGES = {
     L: { CDR1: [25, 42], CDR2: [58, 77], CDR3: [107, 138], FR1: [1, 24], FR2: [43, 57], FR3: [78, 106], FR4: [139, 999] },
   },
   wolfguy: {
-    H: { CDR1: [151, 199], CDR2: [251, 299], CDR3: [351, 399], FR1: [101, 150], FR2: [200, 250], FR3: [300, 350], FR4: [400, 999] },
+    H: { CDR1: [151, 199], CDR2: [251, 299], CDR3: [331, 399], FR1: [101, 150], FR2: [200, 250], FR3: [300, 330], FR4: [400, 999] },
     L: { CDR1: [551, 599], CDR2: [651, 699], CDR3: [751, 799], FR1: [501, 550], FR2: [600, 650], FR3: [700, 750], FR4: [800, 999] },
   },
 };
@@ -79,6 +89,18 @@ function extractCdrs(residues) {
 function posLabel(chainType, n, ins) {
   const prefix = chainType === 'H' ? 'H' : 'L';
   return `${prefix}${n}${ins && ins !== ' ' ? ins : ''}`;
+}
+
+// IMGT alignment of a domain, one entry per residue of the domain slice
+// (null when the residue carries no IMGT position).
+function imgtAlignmentFor(domain, start, end) {
+  const len = Math.max(0, end - start);
+  const map = new Array(len).fill(null);
+  for (const r of domain.numbering || []) {
+    const i = r.sequenceIndex - start;
+    if (i >= 0 && i < len) map[i] = { pos: r.position, ins: r.insertionCode || '' };
+  }
+  return map;
 }
 
 // ---------------------------------------------------------------------------
@@ -161,7 +183,8 @@ function processDomain(record, domain, scheme) {
     const normalized = domain.normalizedSequence || record.sequence;
     const seq = normalized.slice(domain.start, domain.end);
     try {
-      const { residues, warnings } = numberLight(seq);
+      const imgt = imgtAlignmentFor(domain, domain.start, domain.end);
+      const { residues, warnings } = numberLight(seq, { imgt });
       out.residues = residues.map((r) => ({ pos: r.pos, aa: r.aa, region: r.region }));
       out.warnings.push(...warnings);
     } catch (e) {

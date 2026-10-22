@@ -868,6 +868,17 @@ export function convertStateVector(scheme, chainLetter, stateVector, sequence) {
 // IMGT state vector reconstruction from anarcism domain output
 // ---------------------------------------------------------------------------
 
+// The IMGT states of a domain are reconstructed from `domain.numbering`, which
+// lists every residue of the domain in sequence order together with its IMGT
+// position and insertion code.
+//
+// Do NOT use `domain.paddedImgtAlignment` to decide which states are
+// deletions: that string is the *sequence* with gaps, and HMM insertion
+// residues are inlined in it, so its length is 128 + (number of insertions)
+// (145 for a long-CDR3 VH) and its characters are shifted by the number of
+// preceding insertions. Reading a state as "deleted" from that string
+// mis-classifies every state that follows an insertion and a deletion, which
+// duplicates one residue and drops another.
 export function domainToStateVector(domain) {
   const sv = [];
   const insertionsByPos = new Map();
@@ -887,14 +898,13 @@ export function domainToStateVector(domain) {
   const seqParts = [];
   let cursor = 0;
   for (let s = 1; s <= 128; s++) {
-    const ch = domain.paddedImgtAlignment[s - 1];
-    if (ch === '-') {
+    // A state without a residue in the numbering is a deletion.
+    const match = matchByPos.get(s);
+    if (!match) {
       sv.push([[s, 'd'], null]);
       continue;
     }
-    const match = matchByPos.get(s);
-    const aa = match ? match.aminoAcid : ch;
-    seqParts.push(aa);
+    seqParts.push(match.aminoAcid);
     sv.push([[s, 'm'], cursor]);
     cursor += 1;
     const ins = insertionsByPos.get(s);

@@ -2,7 +2,7 @@
 // Service worker: precache the full app (including the ~1 MB numbering engine)
 // so the tool works completely offline after the first visit.
 
-const CACHE = 'antibody-number-v4';
+const CACHE = 'antibody-number-v7';
 
 const ASSETS = [
   './',
