@@ -2,7 +2,18 @@
 // Service worker: precache the full app (including the ~1 MB numbering engine)
 // so the tool works completely offline after the first visit.
 
-const CACHE = 'antibody-number-v7';
+// Derive the project id from this worker's own path (e.g. /number/sw.js ->
+// "number") so several PWAs can share one *.github.io origin without ever
+// touching each other's caches.
+const PROJECT = (() => {
+  const dir = self.location.pathname.replace(/\/sw\.js$/, '');
+  const segment = dir.split('/').filter(Boolean).pop();
+  return segment || 'root';
+})();
+const CACHE_PREFIX = `pwa-cache-${PROJECT}--`;
+const CACHE = `${CACHE_PREFIX}v8`;
+// Pre-convention cache name used by earlier releases of this same app.
+const LEGACY_PREFIX = 'antibody-number-';
 
 const ASSETS = [
   './',
@@ -38,7 +49,12 @@ self.addEventListener('install', (event) => {
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((keys) =>
-      Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))),
+      Promise.all(
+        keys
+          .filter((k) => k !== CACHE)
+          .filter((k) => k.startsWith(CACHE_PREFIX) || k.startsWith(LEGACY_PREFIX))
+          .map((k) => caches.delete(k)),
+      ),
     ).then(() => self.clients.claim()),
   );
 });
@@ -48,19 +64,21 @@ self.addEventListener('fetch', (event) => {
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return;
+  // Stay inside this app's own scope (/number/), even if the worker is ever
+  // registered more broadly.
+  if (!url.pathname.startsWith(new URL(self.registration.scope).pathname)) return;
 
   event.respondWith(
-    caches.match(req).then((cached) => {
-      if (cached) return cached;
-      return fetch(req)
-        .then((res) => {
-          if (res && res.ok) {
-            const copy = res.clone();
-            caches.open(CACHE).then((cache) => cache.put(req, copy));
-          }
-          return res;
-        })
-        .catch(() => caches.match('./index.html'));
-    }),
+    caches.open(CACHE).then((cache) =>
+      cache.match(req).then((cached) => {
+        if (cached) return cached;
+        return fetch(req)
+          .then((res) => {
+            if (res && res.ok) cache.put(req, res.clone());
+            return res;
+          })
+          .catch(() => cache.match('./index.html'));
+      }),
+    ),
   );
 });
