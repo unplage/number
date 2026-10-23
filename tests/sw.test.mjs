@@ -74,6 +74,7 @@ test('activate deletes only this project\'s old caches', async () => {
       'pwa-cache-other-project--v1',
       'pwa-cache-number--v7',
       'pwa-cache-number--v8',
+      'pwa-cache-number--v9',
       'antibody-number-v7',
       'unrelated-cache',
     ],
@@ -83,16 +84,16 @@ test('activate deletes only this project\'s old caches', async () => {
   handlers.get('activate')({ waitUntil: (p) => { promise = p; } });
   await promise;
 
-  assert.deepEqual(deleted.sort(), ['antibody-number-v7', 'pwa-cache-number--v7']);
+  assert.deepEqual(deleted.sort(), ['antibody-number-v7', 'pwa-cache-number--v7', 'pwa-cache-number--v8']);
   assert.ok(!deleted.includes('pwa-cache-other-project--v1'));
-  assert.ok(!deleted.includes('pwa-cache-number--v8'));
+  assert.ok(!deleted.includes('pwa-cache-number--v9'));
   assert.ok(!deleted.includes('unrelated-cache'));
 });
 
 test('fetch only serves from this project\'s cache and only inside scope', async () => {
   const { handlers, stores, fetches, cacheFor, openCalls } = await loadWorker();
   const fetchHandler = handlers.get('fetch');
-  const current = cacheFor('pwa-cache-number--v8');
+  const current = cacheFor('pwa-cache-number--v9');
   const other = cacheFor('pwa-cache-other-project--v1');
   other.entries.set(`${SCOPE}app.js`, 'other-pwa-copy');
 
@@ -106,7 +107,7 @@ test('fetch only serves from this project\'s cache and only inside scope', async
   assert.notEqual(res, 'other-pwa-copy', 'must not read another PWA\'s cache');
   assert.deepEqual(fetches, [`${SCOPE}app.js`]);
   assert.ok(current.puts.includes(`${SCOPE}app.js`), 'network response cached locally');
-  assert.ok(openCalls.every((name) => name === 'pwa-cache-number--v8'));
+  assert.ok(openCalls.every((name) => name === 'pwa-cache-number--v9'));
 
   let outside;
   fetchHandler({
@@ -119,7 +120,7 @@ test('fetch only serves from this project\'s cache and only inside scope', async
 test('offline navigation falls back to this project\'s cached index', async () => {
   const { handlers, cacheFor } = await loadWorker({ fetchRejects: true });
   const fetchHandler = handlers.get('fetch');
-  const current = cacheFor('pwa-cache-number--v8');
+  const current = cacheFor('pwa-cache-number--v9');
   current.entries.set(`${SCOPE}index.html`, 'cached-shell');
 
   let responded;

@@ -8,6 +8,7 @@ await loadEngine(wasm);
 
 const VH = 'EVQLVESGGGLVQPGGSLRLSCAASGFTFTDYTMHWVRQAPGKGLEWVARIYPTNGYTRYADSVKGRFTISADTSKNTAYLQMNSLRAEDTAVYYCARMDYWGQGTLVTVSS';
 const VL = 'DIQMTQSPSSLSASVGDRVTITCRASQDVNTAVAWYQQKPGKAPKLLIYSASFLYSGVPSRFSGSRSGTDFTLTISSLQPEDFATYYCQQHYTTPPTFGQGTKVEIK';
+const VL_LAMBDA = 'QSVLTQPPSVSAAPGQKVTISCSGSSSNIGNNYVSWYQQLPGTAPKLLIYDNNKRPSGIPDRFSGSKSGTSATLGITGLQTGDEADYYCGTWDSSLSAVVFGGGTKLTVL';
 
 test('exposes the six schemes and all chain types', () => {
   assert.deepEqual(SCHEMES, ['imgt', 'kabat', 'chothia', 'martin', 'aho', 'wolfguy']);
@@ -114,8 +115,6 @@ test('allowedSpecies restricts chain typing without breaking results', async () 
   assert.ok(d.cdrs.CDR3.length > 0);
 });
 
-const VL_LAMBDA = 'QSVLTQPPSVSAAPGQKVTISCSGSSSNIGNNYVSWYQQLPGTAPKLLIYDNNKRPSGIPDRFSGSKSGTSATLGITGLQTGDEADYYCGTWDSSLSAVVFGGGTKLTVL';
-
 test('Kabat VL: the lambda FR1 gap is preserved and the conserved Cys is L23', async () => {
   const { results } = await analyze([{ id: 'lambda', sequence: VL_LAMBDA }], 'kabat', { wasmSource: wasm });
   const d = results[0].domains[0];
@@ -127,12 +126,59 @@ test('Kabat VL: the lambda FR1 gap is preserved and the conserved Cys is L23', a
   assert.equal(byPos.has('L10'), false);
   assert.equal(byPos.get('L11'), 'V');
   assert.equal(byPos.get('L98'), 'F', 'FR4 starts at the J region');
+  // The FR2/CDR2/FR3 span follows the IMGT states (W35..C88).
+  assert.equal(byPos.get('L35'), 'W');
+  assert.equal(byPos.get('L49'), 'Y');
+  assert.equal(byPos.get('L50'), 'D');
+  assert.equal(byPos.get('L56'), 'S');
+  assert.equal(byPos.get('L57'), 'G');
+  assert.equal(byPos.get('L88'), 'C');
   // The CDR assignment is unchanged.
   assert.equal(d.cdrs.CDR1, 'SGSSSNIGNNYVS');
   assert.equal(d.cdrs.CDR2, 'DNNKRPS');
   assert.equal(d.cdrs.CDR3, 'GTWDSSLSAVV');
   const labels = d.residues.map((r) => r.pos);
   assert.equal(new Set(labels).size, labels.length, 'no duplicated position labels');
+});
+
+test('Kabat VL: an 8-residue CDR2 is numbered L52A and does not spill into FR3', async () => {
+  const seq = VL.replace('LLIYSASFLYS', 'LLIYSAGSFLYS');
+  const { results } = await analyze([{ id: 'vl_cdr2', sequence: seq }], 'kabat', { wasmSource: wasm });
+  const d = results[0].domains[0];
+  assert.equal(d.errors.length, 0);
+  assert.equal(d.cdrs.CDR2, 'SAGSFLYS');
+  assert.deepEqual(
+    d.residues.filter((r) => r.region === 'CDR2').map((r) => r.pos),
+    ['L50', 'L51', 'L52', 'L52A', 'L53', 'L54', 'L55', 'L56'],
+  );
+  assert.equal(d.cdrs.CDR3, 'QQHYTTPPT');
+});
+
+test('Kabat VL: an FR3 deletion keeps CDR2 and leaves a gap', async () => {
+  const seq = VL.replace('LLIYSASFLYSGVPSR', 'LLIYSASFLYSGPSR');
+  const { results } = await analyze([{ id: 'vl_fr3del', sequence: seq }], 'kabat', { wasmSource: wasm });
+  const d = results[0].domains[0];
+  assert.equal(d.errors.length, 0);
+  assert.equal(d.cdrs.CDR2, 'SASFLYS');
+  const labels = d.residues.map((r) => r.pos);
+  assert.equal(new Set(labels).size, labels.length, 'no duplicated position labels');
+  const byPos = new Map(d.residues.map((r) => [r.pos, r.aa]));
+  assert.equal(byPos.has('L58'), false, 'the deleted FR3 position is a gap');
+  assert.equal(byPos.get('L57'), 'G');
+  assert.equal(byPos.get('L59'), 'P');
+});
+
+test('Kabat VL: an FR3 insertion stays in FR3 (L74A), not L82A', async () => {
+  const seq = VL.replace('LTISS', 'LTAISS');
+  const { results } = await analyze([{ id: 'vl_fr3ins', sequence: seq }], 'kabat', { wasmSource: wasm });
+  const d = results[0].domains[0];
+  assert.equal(d.errors.length, 0);
+  assert.equal(d.cdrs.CDR2, 'SASFLYS');
+  const byPos = new Map(d.residues.map((r) => [r.pos, r.aa]));
+  assert.equal(byPos.get('L74'), 'T');
+  assert.equal(byPos.get('L74A'), 'A');
+  assert.equal(byPos.get('L75'), 'I');
+  assert.equal(byPos.has('L82A'), false);
 });
 
 test('Kabat VL: a long CDR3 keeps the J region', async () => {

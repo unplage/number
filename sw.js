@@ -11,7 +11,7 @@ const PROJECT = (() => {
   return segment || 'root';
 })();
 const CACHE_PREFIX = `pwa-cache-${PROJECT}--`;
-const CACHE = `${CACHE_PREFIX}v8`;
+const CACHE = `${CACHE_PREFIX}v9`;
 // Pre-convention cache name used by earlier releases of this same app.
 const LEGACY_PREFIX = 'antibody-number-';
 

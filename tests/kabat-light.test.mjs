@@ -88,6 +88,102 @@ function imgtAlignment(seqLen, { from = 1, gaps = [] } = {}) {
 
 const VL_PREFIX = 'DIQMTQSPSSLSASVGDRVTITCRASQDVNTAVAWYQQKPGKAPKLLIYSASFLYSGVPSRFSGSRSGTDFTLTISSLQPEDFATYYC';
 
+// IMGT states that are absent from the canonical kappa VL alignment above.
+const VL_IMGT_GAPS = [30, 31, 32, 33, 34, 35, 58, 59, 60, 61, 62, 63, 64, 73, 81, 82, 110, 111, 112, 113];
+
+function vlImgt(seq = VL.vl1) {
+  return imgtAlignment(seq.length, { gaps: VL_IMGT_GAPS });
+}
+
+test('short CDR3 uses the ANARCI deletion order and keeps L96/L97', () => {
+  const expected = {
+    6: ['L89', 'L90', 'L91', 'L92', 'L96', 'L97'],
+    7: ['L89', 'L90', 'L91', 'L92', 'L93', 'L96', 'L97'],
+    8: ['L89', 'L90', 'L91', 'L92', 'L93', 'L94', 'L96', 'L97'],
+  };
+  for (const [len, pos] of Object.entries(expected)) {
+    const seq = VL_PREFIX + 'Q'.repeat(Number(len)) + 'FGQGTKVEIK';
+    const { residues } = numberLight(seq);
+    assert.deepEqual(
+      residues.filter((r) => r.region === 'CDR3').map((r) => r.pos),
+      pos,
+      `CDR3 length ${len}`,
+    );
+    assert.equal(residues.find((r) => r.region === 'FR4')?.pos, 'L98');
+  }
+});
+
+test('short CDR1 uses the ANARCI gap order', () => {
+  const seq = VL.vl1.replace('RASQDVNTAVA', 'RASQDVN');
+  const { residues } = numberLight(seq);
+  const cdr1 = residues.filter((r) => r.region === 'CDR1');
+  assert.equal(cdr1.map((r) => r.aa).join(''), 'RASQDVN');
+  assert.deepEqual(cdr1.map((r) => r.pos), ['L24', 'L25', 'L26', 'L27', 'L32', 'L33', 'L34']);
+});
+
+test('CDR2 insertions are numbered L52A instead of spilling into FR3', () => {
+  const imgt = vlImgt();
+  const i57 = imgt.findIndex((m) => m.pos === 57);
+  const seq = VL.vl1.slice(0, i57 + 1) + 'G' + VL.vl1.slice(i57 + 1);
+  const withInsertion = imgt.slice(0, i57 + 1).concat([{ pos: 58, ins: '' }], imgt.slice(i57 + 1));
+  const { residues } = numberLight(seq, { imgt: withInsertion });
+  const cdr2 = residues.filter((r) => r.region === 'CDR2');
+  assert.equal(cdr2.map((r) => r.aa).join(''), 'SAGSFLYS');
+  assert.deepEqual(cdr2.map((r) => r.pos), ['L50', 'L51', 'L52', 'L52A', 'L53', 'L54', 'L55', 'L56']);
+});
+
+test('FR3 deletions leave a gap instead of shifting CDR2', () => {
+  const imgt = vlImgt();
+  const i70 = imgt.findIndex((m) => m.pos === 70);
+  const seq = VL.vl1.slice(0, i70) + VL.vl1.slice(i70 + 1);
+  const withDeletion = imgt.slice(0, i70).concat(imgt.slice(i70 + 1));
+  const { residues } = numberLight(seq, { imgt: withDeletion });
+  const cdr2 = residues.filter((r) => r.region === 'CDR2');
+  assert.equal(cdr2.map((r) => r.aa).join(''), 'SASFLYS');
+  assert.deepEqual(cdr2.map((r) => r.pos), ['L50', 'L51', 'L52', 'L53', 'L54', 'L55', 'L56']);
+  assert.equal(residues.some((r) => r.pos === 'L57'), false);
+});
+
+test('FR3 insertions are numbered at their IMGT position, not always L82A', () => {
+  const imgt = vlImgt();
+  const i72 = imgt.findIndex((m) => m.pos === 72);
+  const seq = VL.vl1.slice(0, i72 + 1) + 'A' + VL.vl1.slice(i72 + 1);
+  const withInsertion = imgt.slice(0, i72 + 1).concat([{ pos: 72, ins: 'A' }], imgt.slice(i72 + 1));
+  const { residues } = numberLight(seq, { imgt: withInsertion });
+  const byPos = new Map(residues.map((r) => [r.pos, r.aa]));
+  assert.equal(byPos.get('L59A'), 'A');
+  assert.equal(byPos.has('L82A'), false);
+  assert.deepEqual(
+    residues.filter((r) => r.region === 'CDR2').map((r) => r.pos),
+    ['L50', 'L51', 'L52', 'L53', 'L54', 'L55', 'L56'],
+  );
+});
+
+test('an IMGT Cys23 entry is only trusted when it is actually Cys', () => {
+  const imgt = vlImgt();
+  const idx23 = imgt.findIndex((m) => m.pos === 23);
+  imgt[idx23] = null;
+  imgt[20] = { pos: 23, ins: '' };
+  const { residues, warnings } = numberLight(VL.vl1, { imgt });
+  const byPos = new Map(residues.map((r) => [r.pos, r.aa]));
+  assert.equal(byPos.get('L23'), 'C');
+  assert.equal(residues.find((r) => r.region === 'CDR1')?.aa, 'R');
+  assert.ok(warnings.some((w) => /not a Cys/.test(w)));
+});
+
+test('an aligned FR1 insertion before Cys keeps the Cys in FR1 at L23', () => {
+  const base = vlImgt();
+  const idx22 = base.findIndex((m) => m.pos === 22);
+  const seq = VL.vl1.slice(0, idx22 + 1) + 'A' + VL.vl1.slice(idx22 + 1);
+  const imgt = base.slice(0, idx22 + 1).concat([{ pos: 22, ins: 'A' }], base.slice(idx22 + 1));
+  const { residues, warnings } = numberLight(seq, { imgt });
+  const byPos = new Map(residues.map((r) => [r.pos, r.aa]));
+  assert.equal(byPos.get('L23'), 'C');
+  assert.equal(byPos.get('L22A'), 'A');
+  assert.equal(residues.find((r) => r.region === 'CDR1')?.aa, 'R');
+  assert.ok(!warnings.some((w) => /FR1 capped/.test(w)));
+});
+
 test('FR1 follows the alignment: the conserved Cys lands on L23 for lambda chains', () => {
   // A lambda light chain is one FR1 residue shorter than the Kabat reference:
   // IMGT position 10 is a gap and the conserved Cys is the 22nd residue.
@@ -158,4 +254,24 @@ test('the J anchor is taken from the J region, not from an FG motif inside CDR3'
   assert.equal(fr4[0].pos, 'L98');
   assert.equal(fr4[0].aa, 'F');
   assert.equal(residues.filter((r) => r.region === 'CDR3').length, 10);
+});
+
+test('the IMGT FR4 start overrides a spurious FG motif inside CDR3', () => {
+  const seq = VL_PREFIX + 'QQFGHTTPPT' + 'FGQGTKVEIK';
+  const imgt = imgtAlignment(seq.length - 10).concat(
+    Array.from({ length: 10 }, (_, i) => ({ pos: 118 + i, ins: '' })),
+  );
+  const { residues } = numberLight(seq, { imgt });
+  const fr4 = residues.filter((r) => r.region === 'FR4');
+  assert.equal(fr4[0].pos, 'L98');
+  assert.equal(fr4[0].aa, 'F');
+  assert.equal(residues.filter((r) => r.region === 'CDR3').length, 10);
+});
+
+test('a broken J behind a spurious FG motif is rejected when IMGT FR4 is known', () => {
+  const seq = VL_PREFIX + 'QQFGHTTPPT' + 'YGQGTKVEIK';
+  const imgt = imgtAlignment(seq.length - 10).concat(
+    Array.from({ length: 10 }, (_, i) => ({ pos: 118 + i, ins: '' })),
+  );
+  assert.throws(() => numberLight(seq, { imgt }), /J-region/);
 });

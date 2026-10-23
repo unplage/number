@@ -29,27 +29,37 @@ anarcism's IMGT output into the 128-state HMM vector and applying a numbering-sc
   (`paddedImgtAlignment` + per-residue `position`/`insertionCode`); `convertStateVector()`
   dispatches to the scheme.
 - **Kabat light chain is special** — `js/kabat-light.js` is a standalone anchor engine
-  (Cys23→Trp35→Cys88→Phe98) that runs on the raw domain sequence. This is deliberate:
-  ANARCI/AbRSA mis-number Kabat VL CDR3 (the upstream `unplage/humanization` README
-  documents the ANARCI VL CDR3 bug; its Kabat-VL gap convention differs from the anchor
-  engine for CDR3s of 8 residues or less, where ANARCI gaps the loop tip first).
-  The engine is a port of `unplage/humanization` `number_light` (MIT) with four
-  deliberate deviations, all covered by `tests/kabat-light.test.mjs`:
+  (Cys23→Trp35→Cys88→Phe98) that runs on the raw domain sequence. Kabat light chains
+  are deliberately not routed through `schemes.js`; the anchor engine keeps the VL
+  handling in one place. The engine is a port of `unplage/humanization` `number_light`
+  (MIT) with these deliberate deviations, all covered by
+  `tests/kabat-light.test.mjs`:
   1. The J-anchor (Phe98) search window is 45 residues instead of 16. With the upstream
      window the `FG.G` motif is truncated for CDR3s of 14 residues or more, the anchor is
      lost and the whole J region is swallowed by CDR3 (FR4 silently empty).
   2. `findJAnchor` evaluates all three motifs before choosing (as the Python reference
-     does) instead of stopping after the first hit.
+     does) instead of stopping after the first hit, and its J-consensus tail is fixed to
+     match the canonical light-chain J tails (`QGTKVE`, `GGTKLT`).
   3. When the IMGT alignment is supplied (`numberLight(seq, {imgt})`, wired up in
      `js/engine.js`), the FR1 is numbered from the alignment: the conserved Cys is
      placed on L23 even for light chains with an FR1 deletion (lambda, IGLV2/3/…) and
      FR1 gaps (e.g. the missing L10) are preserved instead of being closed up.
-  4. The FR1 is capped at 23 residues (mirroring upstream `number_heavy`) so a shifted
-     Cys anchor cannot assign the same position twice.
-  Without the alignment the engine falls back to the upstream behaviour, so
-  `tests/fixtures/vl_reference.json` (generated from the upstream Python) still matches
-  residue-for-residue. The one intentional divergence is `vl_ladder.json` `cdr3_5`
-  (14-residue CDR3), where upstream loses the J region — see the test comments.
+  4. The FR1 is capped at 23 residues only when the Cys anchor comes from the fallback
+     scan (no alignment). An aligned Cys (including an FR1 insertion before it) stays in
+     FR1 at L23 instead of being pushed into CDR1.
+  5. Short CDR1/CDR3 loops use ANARCI's ordered deletion tables. For CDR3 this keeps
+     L96/L97 for loops of 8 residues or less; upstream `number_light` numbered them
+     forwards and dropped those positions.
+  6. With an IMGT alignment, Phe98 is the first FR4 residue (IMGT >= 118), so a
+     CDR3-internal `FG`/`FXXG` motif cannot become the J anchor, and FR2/CDR2/FR3 labels
+     are derived from the IMGT states: CDR2 insertions get L52A…, FR3 insertions keep
+     their actual position, and deletions leave gaps instead of shifting CDR2. The
+     aligned Cys23 is only trusted when the residue is actually Cys.
+  Without the alignment the engine falls back to the anchor heuristics (CDR1/CDR3 still
+  use the ANARCI deletion order). `tests/fixtures/vl_reference.json` (generated from the
+  upstream Python) still matches residue-for-residue because it contains no short loops.
+  The other intentional divergence is `vl_ladder.json` `cdr3_5` (14-residue CDR3), where
+  upstream loses the J region — see the test comments.
 
 `js/vhh.js` flags camelid VHH sequences (Kabat FR2 positions 37/44/45/47). `js/validate.js`
 rejects nucleotide / malformed input and flags tags. `js/analysis.js` computes CDR lengths
@@ -66,7 +76,9 @@ synchronous engine.
 
 - **Do not "fix" the Kabat-VL split.** Do not route Kabat light chains through
   `schemes.js`. `convertStateVector('kabat','L',…)` exists only for scheme comparison in
-  tests; the app intentionally uses `kabat-light.js`.
+  tests; the app intentionally uses `kabat-light.js`. Short CDR3 loops are intentionally
+  numbered with ANARCI's deletion order (L96/L97 preserved), which differs from upstream
+  `number_light`; keep those tests green.
 - **Do not change the anarcism output → state-vector reconstruction casually.** Parity with
   real ANARCI for every scheme depends on it. Keep `tests/schemes.test.mjs` green.
 - **Never derive the deletion states from `domain.paddedImgtAlignment`.** That string is the
@@ -93,7 +105,7 @@ synchronous engine.
 
 ## Testing
 
-`npm test` (89 tests). Golden fixtures in `tests/fixtures/` were generated from the real
+`npm test` (121 tests). Golden fixtures in `tests/fixtures/` were generated from the real
 upstream tools and can be regenerated with the committed scripts:
 
 - `anarci_all_schemes.json` — real ANARCI for Kabat/Chothia/Martin/AHo/Wolfguy, VH and VL
@@ -103,7 +115,9 @@ upstream tools and can be regenerated with the committed scripts:
 
 `tests/schemes.test.mjs` asserts the JS ports match ANARCI residue-for-residue. When
 touching `js/schemes.js`, regenerate and re-diff. Reference upstream sources are in
-`docs/reference/`.
+`docs/reference/`. `tests/kabat-light.test.mjs` additionally covers short CDR1/CDR3,
+CDR2 insertions, FR2/FR3 indels, and the IMGT FR4/Cys23 anchors. `tests/engine.test.mjs`
+exercises the same cases end-to-end through anarcism (including lambda and long CDR3).
 
 ## Licensing (important)
 
